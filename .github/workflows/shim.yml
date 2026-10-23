@@ -54,7 +54,7 @@ jobs:
           ls -l out/payload.bin
       - name: Shim + boot image
         run: |
-          BOARD=guacamole DTB=guacamole.dtb bash shim/build.sh out/payload.bin
+          BOARD=guacamole DTB=../guacamole.dtb bash shim/build.sh ../out/payload.bin
           ls -l shim/out/
           sha256sum shim/out/shim-boot.img out/guacamole.adt out/payload.bin
       - uses: actions/upload-artifact@v4
