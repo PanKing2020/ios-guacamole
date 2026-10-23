@@ -1,0 +1,71 @@
+name: shim
+on:
+  workflow_dispatch:
+    inputs:
+      cpus:
+        description: "cpus=<n> boot argument (start 4, raise to 8 later)"
+        default: "4"
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Kernel from the latest xnu workflow run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RID=$(gh run list --repo "${{ github.repository }}" --workflow xnu --limit 1 --json databaseId -q '.[0].databaseId')
+          echo "kernel run: $RID"
+          gh run download "$RID" --repo "${{ github.repository }}" -n xnu-kernel -D kernel
+          K=$(find kernel -name 'kernel.development.sweet' -type f | head -1)
+          [ -n "$K" ] || { echo "::error::kernel.development.sweet not found in artifact"; ls -R kernel; exit 1; }
+          cp "$K" kernel.development.sweet
+          ls -l kernel.development.sweet
+          sha256sum kernel.development.sweet | tee kernel.sha256
+      - name: Dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu cpio gcc python3
+          git clone -q --depth 1 https://android.googlesource.com/platform/system/tools/mkbootimg /tmp/mkbootimg
+          printf '#!/bin/sh\nexec python3 /tmp/mkbootimg/mkbootimg.py "$@"\n' | sudo tee /usr/local/bin/mkbootimg >/dev/null
+          sudo chmod +x /usr/local/bin/mkbootimg
+      - name: Check DTB
+        run: |
+          test -f guacamole.dtb || { echo "::error::guacamole.dtb missing at repo root"; exit 1; }
+          python3 - <<'PY'
+          import struct
+          d=open('guacamole.dtb','rb').read()
+          assert d[:4]==b'\xd0\x0d\xfe\xed', 'not an FDT'
+          print('FDT totalsize =', struct.unpack_from('>I',d,4)[0], 'file bytes =', len(d))
+          PY
+      - name: ADT
+        run: |
+          mkdir -p out
+          python3 tools/mkadt.py out/guacamole.adt --device guacamole --highmem --dram-size 0x100000000
+          ls -l out/guacamole.adt
+      - name: Payload
+        run: |
+          python3 tools/mkpayload.py kernel.development.sweet out/guacamole.adt out/payload.bin \
+            --cmdline "debug=0xc serial=3 cpus=${{ inputs.cpus }} keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_noconsole=1 sweetfb_hz=30"
+          ls -l out/payload.bin
+      - name: Shim + boot image
+        run: |
+          BOARD=guacamole DTB=guacamole.dtb bash shim/build.sh out/payload.bin
+          ls -l shim/out/
+          sha256sum shim/out/shim-boot.img out/guacamole.adt out/payload.bin
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: guacamole-boot
+          path: |
+            shim/out/shim-boot.img
+            shim/out/Image
+            out/guacamole.adt
+            out/payload.bin
+            kernel.development.sweet
+            kernel.sha256
+          retention-days: 30
