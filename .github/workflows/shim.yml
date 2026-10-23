@@ -21,11 +21,11 @@ jobs:
           RID=$(gh run list --repo "${{ github.repository }}" --workflow xnu --limit 1 --json databaseId -q '.[0].databaseId')
           echo "kernel run: $RID"
           gh run download "$RID" --repo "${{ github.repository }}" -n xnu-kernel -D kernel
-          K=$(find kernel -name 'kernel.development.sweet' -type f | head -1)
-          [ -n "$K" ] || { echo "::error::kernel.development.sweet not found in artifact"; ls -R kernel; exit 1; }
-          cp "$K" kernel.development.sweet
-          ls -l kernel.development.sweet
-          sha256sum kernel.development.sweet | tee kernel.sha256
+          K=$(find kernel -name 'kernel.development.*' -type f | grep -v -e '\.dSYM' -e '\.link' | head -1)
+          [ -n "$K" ] || { echo "::error::kernel.macho not found in artifact"; ls -R kernel; exit 1; }
+          cp "$K" kernel.macho
+          ls -l kernel.macho
+          sha256sum kernel.macho | tee kernel.sha256
       - name: Dependencies
         run: |
           sudo apt-get update -qq
@@ -49,7 +49,7 @@ jobs:
           ls -l out/guacamole.adt
       - name: Payload
         run: |
-          python3 tools/mkpayload.py kernel.development.sweet out/guacamole.adt out/payload.bin \
+          python3 tools/mkpayload.py kernel.macho out/guacamole.adt out/payload.bin \
             --cmdline "debug=0xc serial=3 cpus=${{ inputs.cpus }} keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_noconsole=1 sweetfb_hz=30"
           ls -l out/payload.bin
       - name: Shim + boot image
@@ -66,6 +66,6 @@ jobs:
             shim/out/Image
             out/guacamole.adt
             out/payload.bin
-            kernel.development.sweet
+            kernel.macho
             kernel.sha256
           retention-days: 30
