@@ -4,7 +4,7 @@ on:
     inputs:
       cpus:
         description: "cpus=<n> boot argument (start 4, raise to 8 later)"
-        default: "4"
+        default: "1"
 permissions:
   contents: read
   actions: read
@@ -50,7 +50,7 @@ jobs:
       - name: Payload
         run: |
           python3 tools/mkpayload.py kernel.macho out/guacamole.adt out/payload.bin \
-            --cmdline "debug=0xc serial=3 cpus=${{ inputs.cpus }} keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetfb_noconsole=1 sweetfb_hz=30"
+            --cmdline "debug=0xc serial=3 cpus=${{ inputs.cpus }} keepsyms=1 -enable_kprintf_spam -noprogress rd=ufsroot0 unentitled_ios_sim_launch=1 ignition_level=1 wdt_test=no_user_checkin ufsrw=1 rootrw=1 launchd_unsecure_cache=1 wdt=-1 sweetusb=0 sweettouchdelay=20 sweetfb_noconsole=1 sweetfb_hz=30"
           ls -l out/payload.bin
       - name: Shim + boot image
         run: |
