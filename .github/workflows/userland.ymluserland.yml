@@ -47,7 +47,7 @@ jobs:
           bash userland/mesa/mk-mesa.sh 2>&1 | tail -60
           ls -l userland/mesa/build/out || true
 
-      - name: userland helpers (keep going: collect every target that builds)
+      - name: userland helpers (keep going, collect every target that builds)
         continue-on-error: true
         run: |
           set -x
