@@ -1,29 +1,35 @@
 name: userland
 
-# Builds the ios-sweet iOS userland helpers (tools/build.sh) and Mesa's OSMesa
+# Builds the ios-sweet iOS userland helpers (userland/build.sh) and Mesa's OSMesa
 # for the EAGL shim (userland/mesa/mk-mesa.sh) on GitHub's macOS runners, which
 # is the only environment with `xcrun --sdk iphoneos clang`.
 #
 # Products (artifact `sweet-userland`):
-#   userland/out/*            sweet-bbd, libsweet-bbd.dylib, sweet-autorun,
-#                             wland, libsweet-gl.dylib, libsweet-glapp.dylib, ...
-#   userland/mesa/build/out/  libOSMesa.8.dylib, gl.xml, exported-gl.txt
+#   sweet-bbd, libsweet-bbd.dylib, sweet-autorun, wland, libsweet-gl.dylib,
+#   libsweet-glapp.dylib, libOSMesa.8.dylib, gl.xml, exported-gl.txt
 #
-# Install them on the phone through SWEETBOX (tools/sweet-mailbox.py pack ...
-# -> rawdump), never by reflashing userdata.
+# Install them on the phone by writing them into the iOS root image (they are
+# too big for one SWEETBOX: the modem firmware alone is 76 MB and BOX_MAX_SIZE
+# is 64 MiB) -- see _vm/step30_stage2_root.py in the replication workspace.
 
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: runner label (macos-15 arm64 / macos-15-intel x64)
+        default: macos-15
   push:
     branches: [main]
     paths:
       - "userland/**"
-      - ".github/workflows/userland.yml"
+      - ".github/workflows/userland.ymluserland.yml"
 
 jobs:
   build:
     # macos-14 was retired on 2026-11-02; macos-15 is arm64 and has Xcode 16+.
-    runs-on: macos-15
+    # The arm64 free pool runs out of capacity often ("The job was not acquired
+    # by Runner of type hosted"), hence the runner input: macos-15-intel.
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
@@ -32,7 +38,9 @@ jobs:
         run: |
           brew install bison jq || true
           echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
+          echo "/usr/local/opt/bison/bin" >> "$GITHUB_PATH"
           sw_vers
+          uname -m
           ls -d /Applications/Xcode*.app
           XC=$(ls -d /Applications/Xcode_*.app | sort -V | head -1)
           sudo xcode-select -s "$XC"
@@ -59,12 +67,12 @@ jobs:
       - name: Collect
         if: always()
         run: |
-          mkdir -p out
-          cp -R userland/out/. out/ 2>/dev/null || true
-          mkdir -p out/mesa
-          cp -R userland/mesa/build/out/. out/mesa/ 2>/dev/null || true
-          ls -la out out/mesa || true
-          (cd out && shasum -a 256 * 2>/dev/null | grep -v '^.* \\(mesa\\)$' || true) > SHA256SUMS || true
+          mkdir -p stage
+          cp -R userland/out/. stage/ 2>/dev/null || true
+          mkdir -p stage/mesa
+          cp -R userland/mesa/build/out/. stage/mesa/ 2>/dev/null || true
+          ls -la stage stage/mesa || true
+          (cd stage && shasum -a 256 * ) > SHA256SUMS 2>/dev/null || true
           cat SHA256SUMS || true
 
       - uses: actions/upload-artifact@v4
@@ -72,7 +80,7 @@ jobs:
         with:
           name: sweet-userland
           path: |
-            out/
+            stage/
             SHA256SUMS
           if-no-files-found: warn
           retention-days: 14
