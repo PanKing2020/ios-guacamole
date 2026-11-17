@@ -1,0 +1,78 @@
+name: userland
+
+# Builds the ios-sweet iOS userland helpers (tools/build.sh) and Mesa's OSMesa
+# for the EAGL shim (userland/mesa/mk-mesa.sh) on GitHub's macOS runners, which
+# is the only environment with `xcrun --sdk iphoneos clang`.
+#
+# Products (artifact `sweet-userland`):
+#   userland/out/*            sweet-bbd, libsweet-bbd.dylib, sweet-autorun,
+#                             wland, libsweet-gl.dylib, libsweet-glapp.dylib, ...
+#   userland/mesa/build/out/  libOSMesa.8.dylib, gl.xml, exported-gl.txt
+#
+# Install them on the phone through SWEETBOX (tools/sweet-mailbox.py pack ...
+# -> rawdump), never by reflashing userdata.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "userland/**"
+      - ".github/workflows/userland.yml"
+
+jobs:
+  build:
+    # macos-14 was retired on 2026-11-02; macos-15 is arm64 and has Xcode 16+.
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deps
+        run: |
+          brew install bison jq || true
+          echo "/opt/homebrew/opt/bison/bin" >> "$GITHUB_PATH"
+          sw_vers
+          ls -d /Applications/Xcode*.app
+          XC=$(ls -d /Applications/Xcode_*.app | sort -V | head -1)
+          sudo xcode-select -s "$XC"
+          xcodebuild -version
+          bison --version | head -1
+          xcrun --sdk iphoneos --show-sdk-path
+
+      - name: Mesa OSMesa (freedreno + softpipe) for the EAGL shim
+        continue-on-error: true
+        run: |
+          set -x
+          bash userland/mesa/mk-mesa.sh 2>&1 | tail -60
+          ls -l userland/mesa/build/out || true
+
+      - name: userland helpers (keep going: collect every target that builds)
+        continue-on-error: true
+        run: |
+          set -x
+          sed -i '' 's/^set -e$/# set -e (CI keeps going)/' userland/build.sh || true
+          head -20 userland/build.sh
+          bash userland/build.sh 2>&1 | tail -120
+          ls -l userland/out || true
+
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out
+          cp -R userland/out/. out/ 2>/dev/null || true
+          mkdir -p out/mesa
+          cp -R userland/mesa/build/out/. out/mesa/ 2>/dev/null || true
+          ls -la out out/mesa || true
+          (cd out && shasum -a 256 * 2>/dev/null | grep -v '^.* \\(mesa\\)$' || true) > SHA256SUMS || true
+          cat SHA256SUMS || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sweet-userland
+          path: |
+            out/
+            SHA256SUMS
+          if-no-files-found: warn
+          retention-days: 14
