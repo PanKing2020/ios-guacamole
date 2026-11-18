@@ -8,16 +8,15 @@ name: userland
 #   sweet-bbd, libsweet-bbd.dylib, sweet-autorun, wland, libsweet-gl.dylib,
 #   libsweet-glapp.dylib, libOSMesa.8.dylib, gl.xml, exported-gl.txt
 #
-# Install them on the phone by writing them into the iOS root image (they are
-# too big for one SWEETBOX: the modem firmware alone is 76 MB and BOX_MAX_SIZE
-# is 64 MiB) -- see _vm/step30_stage2_root.py in the replication workspace.
+# Install them on the phone by writing them into the iOS root image; see
+# _vm/step30_stage2_root.py in the replication workspace.
 
 on:
   workflow_dispatch:
     inputs:
       runner:
         description: runner label (macos-15 arm64 / macos-15-intel x64)
-        default: macos-15
+        default: macos-15-intel
   push:
     branches: [main]
     paths:
@@ -26,10 +25,10 @@ on:
 
 jobs:
   build:
-    # macos-14 was retired on 2026-11-02; macos-15 is arm64 and has Xcode 16+.
-    # The arm64 free pool runs out of capacity often ("The job was not acquired
-    # by Runner of type hosted"), hence the runner input: macos-15-intel.
-    runs-on: ${{ inputs.runner || 'macos-15' }}
+    # macos-14 was retired on 2026-11-02. The arm64 free pool runs out of
+    # capacity often ("The job was not acquired by Runner of type hosted"),
+    # hence the runner input and the intel default.
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
@@ -48,11 +47,26 @@ jobs:
           bison --version | head -1
           xcrun --sdk iphoneos --show-sdk-path
 
+      - name: Local fix: keep draining the Bluetooth UART during a firmware download
+        run: |
+          # guacamole replication, 2026-11-18: btuart.c's download() collects the
+          # controller's events into uint8_t ev[4096] and then calls
+          # drain(ev + evn, sizeof(ev) - evn). Once evn reaches the buffer size,
+          # drain() returns at once ("max - got < 4"), the RX FIFO backs up, the
+          # controller holds CTS and uart_write() dies with
+          # "uart: TX FIFO stuck (CTS held?)" after ~26 of 926 segments.
+          # Nothing downstream reads those bytes during the rampatch upload, so
+          # reuse the buffer instead of starving the FIFO, and report how many
+          # event bytes had arrived when a segment fails.
+          echo 'aW1wb3J0IHN5cwoKcCA9ICd1c2VybGFuZC9idC9idHVhcnQuYycKcyA9IG9wZW4ocCkucmVhZCgpCgpvbGQgPSAiXHRcdGV2biArPSBkcmFpbihldiArIGV2biwgc2l6ZW9mKGV2KSAtIGV2bik7IgpuZXcgPSAoCiAgICAiXHRcdC8qIDIwMjYtMTEtMTggKGd1YWNhbW9sZSByZXBsaWNhdGlvbik6IHRoZSAyMDI2LTExLTEwIGJ1c3ktbG9vcCBmaXggcmVwbGFjZWRcbiIKICAgICJcdFx0ICogdGhlIHBlci1zZWdtZW50IHVhcnRfcmVhZCguLiwgMykgaGVyZSB3aXRoIGEgbm9uLXdhaXRpbmcgZHJhaW4oKSwgYW5kIHdhc1xuIgogICAgIlx0XHQgKiBvbmx5IHN5bnRheC1jaGVja2VkOiB3aXRoIGEgZnVsbCBldmVudCBidWZmZXIgZHJhaW4oKSByZXR1cm5zIGF0IG9uY2UsIHRoZVxuIgogICAgIlx0XHQgKiBSWCBGSUZPIHN0b3BzIGJlaW5nIGVtcHRpZWQgYW5kIHRoZSBjb250cm9sbGVyIGhvbGRzIENUU1xuIgogICAgIlx0XHQgKiAoXCJ1YXJ0OiBUWCBGSUZPIHN0dWNrIChDVFMgaGVsZD8pXCIpIGFmdGVyIH4yNiBvZiA5MjYgc2VnbWVudHMuIFRoZSByZWNvcmRlZFxuIgogICAgIlx0XHQgKiBnb29kIGRvd25sb2FkICg5MjYgc2VnbWVudHMgLyAyMy41IHMpIHVzZWQgdGhlIHdhaXRpbmcgcmVhZCwgc28gdXNlIGl0IGFnYWluXG4iCiAgICAiXHRcdCAqIGFuZCBtYWtlIHN1cmUgdGhlIGJ1ZmZlciBjYW4gbmV2ZXIgc3RvcCB0aGUgZHJhaW5pbmcuICovXG4iCiAgICAiXHRcdGlmIChzaXplb2YoZXYpIC0gZXZuIDwgOClcbiIKICAgICJcdFx0XHRldm4gPSAwO1xuIgogICAgIlx0XHRldm4gKz0gdWFydF9yZWFkKGV2ICsgZXZuLCBzaXplb2YoZXYpIC0gZXZuLCAzKTsiCikKaWYgb2xkIG5vdCBpbiBzOgogICAgc3lzLmV4aXQoJ2Rvd25sb2FkIGRyYWluIGxpbmUgbm90IGZvdW5kJykKcyA9IHMucmVwbGFjZShvbGQsIG5ldywgMSkKCm9sZDIgPSAnXHRcdFx0cHJpbnRmKCIgIHNlZ21lbnQgJXU6IHdyaXRlIGZhaWxlZFxcbiIsIHNlZ3MpOycKbmV3MiA9ICgnXHRcdFx0cHJpbnRmKCIgIHNlZ21lbnQgJXU6IHdyaXRlIGZhaWxlZCAoJXUgYnl0ZXMgb2YgZXZlbnRzIHNvIGZhcilcXG4iLFxuJwogICAgICAgICdcdFx0XHQgICAgc2VncywgZXZuKTsnKQppZiBvbGQyIG5vdCBpbiBzOgogICAgc3lzLmV4aXQoJ3dyaXRlLWZhaWxlZCBwcmludGYgbm90IGZvdW5kJykKcyA9IHMucmVwbGFjZShvbGQyLCBuZXcyLCAxKQoKb3BlbihwLCAndycpLndyaXRlKHMpCnByaW50KCdidHVhcnQuYzogZG93bmxvYWQoKSBiYWNrIHRvIHVhcnRfcmVhZCguLiwgMykgKCsgYnVmZmVyIGd1YXJkKScpCg==' | base64 -d > /tmp/btuart-fix.py
+          python3 /tmp/btuart-fix.py
+          grep -n -A3 'keep the FIFO drained' userland/bt/btuart.c
+
       - name: Mesa OSMesa (freedreno + softpipe) for the EAGL shim
         continue-on-error: true
         run: |
           set -x
-          bash userland/mesa/mk-mesa.sh 2>&1 | tail -60
+          bash userland/mesa/mk-mesa.sh 2>&1 | tail -40
           ls -l userland/mesa/build/out || true
 
       - name: userland helpers (keep going, collect every target that builds)
@@ -60,8 +74,7 @@ jobs:
         run: |
           set -x
           sed -i '' 's/^set -e$/# set -e (CI keeps going)/' userland/build.sh || true
-          head -20 userland/build.sh
-          bash userland/build.sh 2>&1 | tail -120
+          bash userland/build.sh 2>&1 | tail -40
           ls -l userland/out || true
 
       - name: Collect
@@ -72,7 +85,7 @@ jobs:
           mkdir -p stage/mesa
           cp -R userland/mesa/build/out/. stage/mesa/ 2>/dev/null || true
           ls -la stage stage/mesa || true
-          (cd stage && shasum -a 256 * ) > SHA256SUMS 2>/dev/null || true
+          (cd stage && shasum -a 256 *) > SHA256SUMS 2>/dev/null || true
           cat SHA256SUMS || true
 
       - uses: actions/upload-artifact@v4
