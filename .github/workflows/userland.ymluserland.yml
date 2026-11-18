@@ -47,7 +47,7 @@ jobs:
           bison --version | head -1
           xcrun --sdk iphoneos --show-sdk-path
 
-      - name: Local fix: keep draining the Bluetooth UART during a firmware download
+      - name: Local fix, keep the Bluetooth UART drained during a firmware download
         run: |
           # guacamole replication, 2026-11-18: btuart.c's download() collects the
           # controller's events into uint8_t ev[4096] and then calls
